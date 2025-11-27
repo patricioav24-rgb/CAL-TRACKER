@@ -117,22 +117,14 @@ cluster_reps = cluster_cols[0].number_input("Reps por mini-set", min_value=1, va
 cluster_sets = cluster_cols[1].number_input("Mini-sets (por cluster)", min_value=1, value=3, key="cs")
 cluster_rest = cluster_cols[2].number_input("Descanso (s) entre mini-sets", min_value=5, value=45, key="crt")
 
-if st.button("Iniciar Cluster"):
-    st.session_state.running = True
+# ---------- Main timer display ----------
+if st.session_state.running:
+    if st.session_state.start_time is not None:
+        elapsed = int(time.time() - st.session_state.start_time)
+        st.metric("⏱ Tiempo desde inicio (s)", elapsed)
+    else:
+        st.metric("⏱ Tiempo desde inicio (s)", "0")
 
-    for s in range(cluster_sets):
-        st.info(f"Mini-set {s+1}: haz {cluster_reps} repeticiones")
-
-        placeholder = st.empty()
-        for sec in range(cluster_rest, 0, -1):
-            placeholder.metric("Descanso", f"{sec} s")
-            time.sleep(1)
-
-        placeholder.metric("Descanso", "✔ Terminado")
-
-    st.success("Cluster finalizado. Guarda tus series si quieres registro detallado.")
-
-st.markdown("---")
 
 # ---------- HISTORIAL HOY ----------
 st.markdown("### Historial hoy")
@@ -160,6 +152,7 @@ if st.button("Descargar historial (CSV)"):
         st.download_button("Descargar CSV", csv, "calistracker_history.csv", "text/csv")
     else:
         st.error("No hay datos para descargar.")
+
 
 
 
