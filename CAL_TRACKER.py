@@ -9,7 +9,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 # CONFIG
 # -----------------------
 st.set_page_config("CalisTracker", layout="centered")
-st.title("🏋️ CalisTracker • Calistenia (registro en Google Sheets)")
+st.title("🏋️ CalisTracker • Calistenia ")
 
 # ---------- GOOGLE SHEETS SETUP ----------
 USE_SECRETS = True
@@ -152,6 +152,7 @@ if st.button("Descargar historial (CSV)"):
         st.download_button("Descargar CSV", csv, "calistracker_history.csv", "text/csv")
     else:
         st.error("No hay datos para descargar.")
+
 
 
 
