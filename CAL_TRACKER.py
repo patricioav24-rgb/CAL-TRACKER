@@ -145,9 +145,3 @@ if st.button("Descargar historial (CSV)"):
     else:
         st.error("No hay datos para descargar.")
 
-
-
-
-
-
-
