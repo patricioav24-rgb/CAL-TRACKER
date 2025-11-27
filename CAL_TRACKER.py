@@ -1,139 +1,249 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# -----------------------------
-# CONFIG
-# -----------------------------
-st.set_page_config("CalisTracker", layout="centered")
-st.title("🏋️ CalisTracker – Registro de Calistenia (Versión Mejorada)")
+# -------------------------------------------------------
+# CONFIGURACIÓN GENERAL
+# -------------------------------------------------------
+st.set_page_config("CalisTracker", layout="wide")
+st.title("🏋️ CalisTracker – Registro de Calistenia")
 
-st.write("Registra tus series temporalmente y guarda todo al final.")
-
-# -----------------------------
-# GOOGLE SHEETS SETUP
-# -----------------------------
-USE_SECRETS = True
 SHEET_NAME = "CalisTracker"
 
-scopes = ["https://spreadsheets.google.com/feeds",
-          "https://www.googleapis.com/auth/drive"]
+scopes = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive"
+]
 
 def get_client():
-    if USE_SECRETS:
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(
-            st.secrets["gcp_service_account"], scopes)
-    else:
-        creds = ServiceAccountCredentials.from_json_keyfile_name(
-            "service_account.json", scopes)
+    """Conecta usando las credenciales en st.secrets."""
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(
+        st.secrets["gcp_service_account"], scopes
+    )
     return gspread.authorize(creds)
 
 @st.cache_resource(ttl=600)
 def open_sheet():
     client = get_client()
-    return client.open(SHEET_NAME).sheet1
+    sh = client.open(SHEET_NAME)
+    wks = sh.sheet1
+    return wks
 
-def ensure_header(sheet):
-    header = ["timestamp","date","exercise","method","set","reps","rest","notes"]
-    first = sheet.row_values(1)
+def ensure_header(wks):
+    """Crea encabezado si no existe."""
+    header = [
+        "fecha", "ejercicio", "metodo", "total_sets",
+        "reps_por_set", "total_volumen", "descanso", "notas"
+    ]
+    first = wks.row_values(1)
     if first != header:
-        try:
-            sheet.delete_rows(1)
-        except:
-            pass
-        sheet.insert_row(header, 1)
+        wks.clear()
+        wks.insert_row(header, 1)
 
-# -----------------------------
-# SESSION STATE (TEMPORAL STORAGE)
-# -----------------------------
-if "temp_sets" not in st.session_state:
-    st.session_state.temp_sets = []  # list of {"set": n, "reps": x, "notes": y}
+# -------------------------------------------------------
+# ESTADO DE LA SESIÓN
+# -------------------------------------------------------
+if "sets" not in st.session_state:
+    st.session_state.sets = []
 
-# -----------------------------
-# INPUTS
-# -----------------------------
+if "set_count" not in st.session_state:
+    st.session_state.set_count = 0
+
+# -------------------------------------------------------
+# UI – Registro de sesión
+# -------------------------------------------------------
+st.header("📘 Registro de Entrenamiento")
+
 today = datetime.now().strftime("%Y-%m-%d")
-st.write("📅 Fecha:", today)
+st.write("**Fecha:**", today)
 
-exercise = st.selectbox(
-    "Ejercicio:",
-    ["Dominadas pronas", "Dominadas supinas", "Fondos", "Flexiones", "Remo invertido", "Otro"]
-)
+ejercicio = st.selectbox("Ejercicio", [
+    "Dominadas – Pronas",
+    "Dominadas – Supinas",
+    "Fondos",
+    "Flexiones",
+    "Remo invertido",
+    "Otro"
+])
 
-method = st.selectbox("Método:", ["Volumen", "Series Libres"])
+metodo = st.selectbox("Método", ["Volumen", "Series Libres"])
 
-rest = st.number_input("Descanso (seg)", min_value=0, value=45)
-notes_global = st.text_input("Notas generales (opcional)")
+col1, col2 = st.columns(2)
+with col1:
+    descanso = st.number_input("Descanso por serie (seg)", min_value=0, value=45)
+with col2:
+    notas = st.text_input("Notas (opcional)")
 
-st.markdown("---")
+st.subheader("➕ Registrar series")
 
-# -----------------------------
-# AGREGAR SET (TEMPORAL)
-# -----------------------------
-st.write("## ➕ Registrar una Serie (temporal)")
+reps = st.number_input("Reps de esta serie:", min_value=0, value=0)
 
-reps = st.number_input("Repeticiones de esta serie:", min_value=0, value=0)
-notes_set = st.text_input("Notas del set (opcional)")
+if st.button("Agregar serie"):
+    st.session_state.set_count += 1
+    st.session_state.sets.append(reps)
+    st.success(f"Serie agregada ({reps} reps). Total sets: {st.session_state.set_count}")
 
-if st.button("Agregar esta serie"):
-    set_number = len(st.session_state.temp_sets) + 1
-    st.session_state.temp_sets.append({
-        "set": set_number,
-        "reps": reps,
-        "notes": notes_set
-    })
-    st.success(f"Serie {set_number} agregada temporalmente.")
-
-st.markdown("---")
-
-# -----------------------------
-# MOSTRAR TABLA TEMPORAL
-# -----------------------------
-st.write("## 📘 Series registradas (temporal)")
-
-if st.session_state.temp_sets:
-    temp_df = pd.DataFrame(st.session_state.temp_sets)
-    st.dataframe(temp_df, use_container_width=True)
-
-    # Botón para eliminar último set
-    if st.button("❌ Eliminar último set"):
-        st.session_state.temp_sets.pop()
-        st.success("Último set eliminado.")
+# Mostrar sets actuales
+if st.session_state.sets:
+    st.write("### Sets actuales")
+    st.write(st.session_state.sets)
 else:
-    st.info("Aún no hay series registradas.")
+    st.info("Aún no agregas series.")
 
+# -------------------------------------------------------
+# Guardar resumen en Google Sheets
+# -------------------------------------------------------
 st.markdown("---")
+if st.button("💾 Guardar sesión en Google Sheets"):
+    try:
+        total_sets = len(st.session_state.sets)
+        total_vol = sum(st.session_state.sets)
+        reps_por_set = ",".join([str(r) for r in st.session_state.sets])
 
-# -----------------------------
-# GUARDAR TODO EN GOOGLE SHEETS
-# -----------------------------
-st.write("## 💾 Guardar toda la sesión en Google Sheets")
+        wks = open_sheet()
+        ensure_header(wks)
 
-if st.button("Guardar sesión completa"):
-    if not st.session_state.temp_sets:
-        st.error("No hay sets registrados para guardar.")
+        row = [
+            today, ejercicio, metodo,
+            total_sets,
+            reps_por_set,
+            total_vol,
+            descanso,
+            notas
+        ]
+        wks.append_row(row)
+
+        st.success("Sesión guardada exitosamente.")
+
+        # Reset
+        st.session_state.sets = []
+        st.session_state.set_count = 0
+
+    except Exception as e:
+        st.error("Error al guardar en Google Sheets: " + str(e))
+
+# -------------------------------------------------------
+# HISTORIAL FILTRADO
+# -------------------------------------------------------
+st.markdown("---")
+st.header("📚 Historial detallado (Filtrado avanzado)")
+
+try:
+    wks = open_sheet()
+    ensure_header(wks)
+    rows = wks.get_all_records()
+    df = pd.DataFrame(rows)
+
+    if df.empty:
+        st.info("Aún no hay historial registrado.")
     else:
-        try:
-            sheet = open_sheet()
-            ensure_header(sheet)
+        df["fecha"] = pd.to_datetime(df["fecha"])
 
-            for set_data in st.session_state.temp_sets:
-                row = [
-                    datetime.now().isoformat(),
-                    today,
-                    exercise,
-                    method,
-                    set_data["set"],
-                    set_data["reps"],
-                    rest,
-                    set_data["notes"]
-                ]
-                sheet.append_row(row, value_input_option="USER_ENTERED")
+        # ---- FILTROS ----
+        st.subheader("🔎 Filtros")
 
-            st.success("Sesión guardada exitosamente en Google Sheets.")
-            st.session_state.temp_sets = []  # limpiar
+        colA, colB, colC = st.columns(3)
 
-        except Exception as e:
-            st.error("Error guardando en Sheets: " + str(e))
+        with colA:
+            ejercicio_f = st.selectbox(
+                "Ejercicio",
+                ["Todos"] + sorted(df["ejercicio"].unique())
+            )
+
+        with colB:
+            metodo_f = st.selectbox(
+                "Método",
+                ["Todos"] + sorted(df["metodo"].unique())
+            )
+
+        with colC:
+            fecha_inicio = st.date_input(
+                "Desde",
+                value=df["fecha"].min().date()
+            )
+
+        fecha_fin = st.date_input(
+            "Hasta",
+            value=df["fecha"].max().date()
+        )
+
+        # ---- APLICAR FILTROS ----
+        filtered_df = df.copy()
+
+        if ejercicio_f != "Todos":
+            filtered_df = filtered_df[filtered_df["ejercicio"] == ejercicio_f]
+
+        if metodo_f != "Todos":
+            filtered_df = filtered_df[filtered_df["metodo"] == metodo_f]
+
+        filtered_df = filtered_df[
+            (filtered_df["fecha"] >= pd.to_datetime(fecha_inicio)) &
+            (filtered_df["fecha"] <= pd.to_datetime(fecha_fin))
+        ]
+
+        # ---- MOSTRAR TABLA ----
+        st.subheader("📄 Resultados filtrados")
+        st.dataframe(filtered_df, use_container_width=True)
+
+        # ---- DESCARGAR ----
+        csv = filtered_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Descargar CSV filtrado",
+            data=csv,
+            file_name="historial_filtrado.csv",
+            mime="text/csv"
+        )
+
+        # ---- GRAFICO DEL EJERCICIO ----
+        if ejercicio_f != "Todos":
+            st.subheader(f"📊 Evolución del volumen – {ejercicio_f}")
+            df_plot = filtered_df.groupby("fecha")["total_volumen"].sum()
+            st.line_chart(df_plot)
+
+except Exception as e:
+    st.error("Error al cargar historial: " + str(e))
+
+
+# -------------------------------------------------------
+# DASHBOARD – Tipo Atleta Profesional
+# -------------------------------------------------------
+st.markdown("---")
+st.header("📊 Dashboard de Progreso")
+
+try:
+    wks = open_sheet()
+    ensure_header(wks)
+    rows = wks.get_all_records()
+    df = pd.DataFrame(rows)
+
+    if df.empty:
+        st.info("No hay datos registrados aún.")
+    else:
+        df["fecha"] = pd.to_datetime(df["fecha"])
+
+        # ----- Gráfico Semanal -----
+        st.subheader("📈 Progreso semanal (volumen total)")
+        last_week = df[df["fecha"] >= datetime.now() - timedelta(days=7)]
+
+        if not last_week.empty:
+            st.line_chart(last_week.groupby("fecha")["total_volumen"].sum())
+        else:
+            st.info("Aún no hay datos suficientes para mostrar la semana.")
+
+        # ----- Gráfico Mensual -----
+        st.subheader("📆 Volumen total mensual")
+        last_month = df[df["fecha"] >= datetime.now() - timedelta(days=30)]
+
+        if not last_month.empty:
+            st.bar_chart(last_month.groupby("ejercicio")["total_volumen"].sum())
+        else:
+            st.info("Aún no hay suficientes datos para el mes.")
+
+        # ----- Comparación por método -----
+        st.subheader("⚔️ Comparación entre métodos")
+        st.bar_chart(df.groupby("metodo")["total_volumen"].sum())
+
+except Exception as e:
+    st.error("Error al generar dashboard: " + str(e))
