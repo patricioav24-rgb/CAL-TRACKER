@@ -1,147 +1,120 @@
 import streamlit as st
 import pandas as pd
-import time
 from datetime import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# -----------------------
-# CONFIG
-# -----------------------
+# -----------------------------
+# CONFIGURACIÓN DE LA APP
+# -----------------------------
 st.set_page_config("CalisTracker", layout="centered")
-st.title("🏋️ CalisTracker • Calistenia ")
+st.title("🏋️ CalisTracker – Registro simple de calistenia")
 
-# ---------- GOOGLE SHEETS SETUP ----------
-USE_SECRETS = True
+st.write("Registra tus series de forma rápida y sin distracciones.")
+
+# -----------------------------
+# GOOGLE SHEETS
+# -----------------------------
+USE_SECRETS = True   # Streamlit Cloud usa secrets
 SHEET_NAME = "CalisTracker"
 
-scopes = [
-    "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/drive"
-]
+scopes = ["https://spreadsheets.google.com/feeds",
+          "https://www.googleapis.com/auth/drive"]
 
-def get_gsheet_client():
+def get_client():
     if USE_SECRETS:
-        sa_info = st.secrets["gcp_service_account"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scopes)
+        sa = st.secrets["gcp_service_account"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(sa, scopes)
     else:
         creds = ServiceAccountCredentials.from_json_keyfile_name("service_account.json", scopes)
-
-    client = gspread.authorize(creds)
-    return client
+    return gspread.authorize(creds)
 
 @st.cache_resource(ttl=600)
 def open_sheet():
-    client = get_gsheet_client()
-    sh = client.open(SHEET_NAME)
-    return sh.sheet1
+    client = get_client()
+    sheet = client.open(SHEET_NAME).sheet1
+    return sheet
 
-def ensure_header(wks):
-    header = ["timestamp","date","exercise","method","set_number","reps","duration_sec","rest_sec","notes"]
-    first = wks.row_values(1)
+def ensure_header(sheet):
+    header = ["timestamp","date","exercise","method","set","reps","target_reps","target_sets","rest","notes"]
+    first = sheet.row_values(1)
     if first != header:
-        wks.delete_rows(1)
-        wks.insert_row(header, 1)
+        try:
+            sheet.delete_rows(1)
+        except: pass
+        sheet.insert_row(header, 1)
 
-# ---------- SESSION STATE ----------
-if "running" not in st.session_state:
-    st.session_state.running = False
-if "start_time" not in st.session_state:
-    st.session_state.start_time = None
-if "set_count" not in st.session_state:
-    st.session_state.set_count = 0
-
-# ---------- Inputs ----------
-col1, col2 = st.columns([2,1])
+# -----------------------------
+# INTERFAZ
+# -----------------------------
 today = datetime.now().strftime("%Y-%m-%d")
+st.write("📅 Fecha:", today)
 
-with col1:
-    st.write("**Fecha:**", today)
-    exercise = st.selectbox("Ejercicio", ["Dominadas - Pronas","Dominadas - Supinas","Fondos","Flexiones","Remo invertido","Otro"])
-    method = st.selectbox("Método", ["Volumen", "Cluster", "EMOM", "Series libres"])
-    notes = st.text_input("Notas (opcional)")
+exercise = st.selectbox(
+    "Ejercicio:",
+    ["Dominadas pronas", "Dominadas supinas", "Fondos", "Flexiones", "Remo invertido", "Otro"]
+)
 
-with col2:
-    rest_default = st.number_input("Descanso por serie (seg)", min_value=0, value=45)
-    target_sets = st.number_input("Series objetivo", min_value=1, value=5)
-    target_reps = st.number_input("Reps objetivo por serie (opcional)", min_value=0, value=0)
+method = st.selectbox("Método:", ["Volumen", "Series Libres"])
+
+target_reps = st.number_input("Reps objetivo por serie", min_value=0, value=4)
+target_sets = st.number_input("Series objetivo", min_value=0, value=10)
+rest = st.number_input("Descanso (seg)", min_value=0, value=45)
+notes = st.text_input("Notas (opcional)")
 
 st.markdown("---")
 
-# ---------- Timer Control ----------
-c1, c2, c3 = st.columns([1,1,2])
+# Estado de la sesión
+if "set_count" not in st.session_state:
+    st.session_state.set_count = 0
 
-with c1:
-    if st.button("Iniciar sesión"):
-        st.session_state.running = True
-        st.session_state.start_time = time.time()
-        st.session_state.set_count = 0
-        st.success("Sesión iniciada")
+st.write("### 🔢 Sets completados:", st.session_state.set_count)
 
-with c2:
-    if st.button("Detener sesión"):
-        st.session_state.running = False
-        st.session_state.start_time = None
-        st.success("Sesión detenida")
+# -----------------------------
+# GUARDAR SERIE
+# -----------------------------
+reps = st.number_input("Repeticiones en esta serie:", min_value=0, value=0)
 
-with c3:
-    st.write("Sets completados:", st.session_state.set_count)
-
-if st.session_state.running:
-    elapsed = int(time.time() - st.session_state.start_time)
-    st.metric("Tiempo desde inicio (s)", value=elapsed)
-
-# ---------- Registrar serie ----------
-st.markdown("### Registrar Serie")
-reps = st.number_input("Repeticiones realizadas (esta serie)", min_value=0, value=0)
-duration = st.number_input("Duración serie (seg)", min_value=0, value=0)
-
-if st.button("Guardar serie"):
+if st.button("💾 Guardar esta serie"):
     st.session_state.set_count += 1
+
     timestamp = datetime.now().isoformat()
-    row = [timestamp, today, exercise, method, st.session_state.set_count, reps, duration, rest_default, notes]
+    row = [
+        timestamp, today, exercise, method,
+        st.session_state.set_count,
+        reps, target_reps, target_sets, rest, notes
+    ]
 
     try:
-        wks = open_sheet()
-        ensure_header(wks)
-        wks.append_row(row, value_input_option="USER_ENTERED")
-        st.success(f"Serie guardada (set {st.session_state.set_count})")
+        sheet = open_sheet()
+        ensure_header(sheet)
+        sheet.append_row(row, value_input_option="USER_ENTERED")
+        st.success(f"Serie {st.session_state.set_count} guardada.")
     except Exception as e:
-        st.error("Error al guardar en Google Sheets: " + str(e))
+        st.error("Error guardando en Google Sheets: " + str(e))
 
-# ---------- Main timer display ----------
-if st.session_state.running:
-    if st.session_state.start_time is not None:
-        elapsed = int(time.time() - st.session_state.start_time)
-        st.metric("⏱ Tiempo desde inicio (s)", elapsed)
-    else:
-        st.metric("⏱ Tiempo desde inicio (s)", "0")
+st.markdown("---")
 
+# -----------------------------
+# HISTORIAL DEL DÍA
+# -----------------------------
+st.write("## 📘 Historial de hoy")
 
-# ---------- HISTORIAL HOY ----------
-st.markdown("### Historial hoy")
 try:
-    wks = open_sheet()
-    rows = wks.get_all_records()
-    df_all = pd.DataFrame(rows)
-    if not df_all.empty:
-        df_today = df_all[df_all["date"] == today]
-        st.dataframe(df_today)
+    sheet = open_sheet()
+    data = sheet.get_all_records()
+    df = pd.DataFrame(data)
 
-        if not df_today.empty:
-            st.write("Volumen total hoy:", int(df_today["reps"].sum()))
-            st.write("Sets hoy:", int(df_today.shape[0]))
+    if not df.empty:
+        df_today = df[df["date"] == today]
+        if df_today.empty:
+            st.info("Aún no hay registros hoy.")
+        else:
+            st.dataframe(df_today, use_container_width=True)
+            st.write("**Sets hoy:**", df_today.shape[0])
+            st.write("**Volumen total (reps):**", int(df_today["reps"].sum()))
     else:
-        st.info("No hay datos guardados aún.")
+        st.info("No hay datos aún.")
 
 except Exception as e:
-    st.error(f"Error al leer Google Sheets: {e}")
-
-# ---------- EXPORT ----------
-if st.button("Descargar historial (CSV)"):
-    if not df_all.empty:
-        csv = df_all.to_csv(index=False).encode("utf-8")
-        st.download_button("Descargar CSV", csv, "calistracker_history.csv", "text/csv")
-    else:
-        st.error("No hay datos para descargar.")
-
+    st.error("Error leyendo historial: " + str(e))
