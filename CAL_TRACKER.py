@@ -109,14 +109,6 @@ if st.button("Guardar serie"):
     except Exception as e:
         st.error("Error al guardar en Google Sheets: " + str(e))
 
-# ---------- FIXED CLUSTER TIMER ----------
-st.markdown("### Herramienta rápida: Cluster timer")
-cluster_cols = st.columns(3)
-
-cluster_reps = cluster_cols[0].number_input("Reps por mini-set", min_value=1, value=4, key="cr")
-cluster_sets = cluster_cols[1].number_input("Mini-sets (por cluster)", min_value=1, value=3, key="cs")
-cluster_rest = cluster_cols[2].number_input("Descanso (s) entre mini-sets", min_value=5, value=45, key="crt")
-
 # ---------- Main timer display ----------
 if st.session_state.running:
     if st.session_state.start_time is not None:
@@ -152,6 +144,7 @@ if st.button("Descargar historial (CSV)"):
         st.download_button("Descargar CSV", csv, "calistracker_history.csv", "text/csv")
     else:
         st.error("No hay datos para descargar.")
+
 
 
 
