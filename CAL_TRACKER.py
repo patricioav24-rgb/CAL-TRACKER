@@ -1,65 +1,165 @@
 import streamlit as st
+import pandas as pd
 import time
+from datetime import datetime
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
-# ---------------------------------------------------
-# CONFIGURACIÓN GENERAL
-# ---------------------------------------------------
-st.title("⏱ Método Cluster – Timer de Entrenamiento")
-st.write("Registra tus repeticiones y controla tus descansos automáticamente.")
+# -----------------------
+# CONFIG
+# -----------------------
+st.set_page_config("CalisTracker", layout="centered")
+st.title("🏋️ CalisTracker • Calistenia (registro en Google Sheets)")
 
-# ---------------------------------------------------
-# ENTRADAS DEL USUARIO
-# ---------------------------------------------------
-ejercicio = st.text_input("Nombre del ejercicio (ej. Dominadas, Fondos, Flexiones):")
-series = st.number_input("Número de series:", min_value=1, step=1)
-descanso = st.number_input("Descanso entre series (segundos):", min_value=5, step=5)
-reps_objetivo = st.number_input("Reps objetivo por serie (opcional):", min_value=0, step=1)
+# ---------- GOOGLE SHEETS SETUP ----------
+USE_SECRETS = False  # True si usarás st.secrets en Streamlit Cloud
+SHEET_NAME = "CalisTracker"
+
+scopes = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive"
+]
+
+def get_gsheet_client():
+    if USE_SECRETS:
+        sa_info = st.secrets["gcp_service_account"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scopes)
+    else:
+        creds = ServiceAccountCredentials.from_json_keyfile_name("service_account.json", scopes)
+
+    client = gspread.authorize(creds)
+    return client
+
+@st.cache_resource(ttl=600)
+def open_sheet():
+    client = get_gsheet_client()
+    sh = client.open(SHEET_NAME)
+    return sh.sheet1
+
+def ensure_header(wks):
+    header = ["timestamp","date","exercise","method","set_number","reps","duration_sec","rest_sec","notes"]
+    first = wks.row_values(1)
+    if first != header:
+        wks.delete_rows(1)
+        wks.insert_row(header, 1)
+
+# ---------- SESSION STATE ----------
+if "running" not in st.session_state:
+    st.session_state.running = False
+if "start_time" not in st.session_state:
+    st.session_state.start_time = None
+if "set_count" not in st.session_state:
+    st.session_state.set_count = 0
+
+# ---------- Inputs ----------
+col1, col2 = st.columns([2,1])
+today = datetime.now().strftime("%Y-%m-%d")
+
+with col1:
+    st.write("**Fecha:**", today)
+    exercise = st.selectbox("Ejercicio", ["Dominadas - Pronas","Dominadas - Supinas","Fondos","Flexiones","Remo invertido","Otro"])
+    method = st.selectbox("Método", ["Volumen", "Cluster", "EMOM", "Series libres"])
+    notes = st.text_input("Notas (opcional)")
+
+with col2:
+    rest_default = st.number_input("Descanso por serie (seg)", min_value=0, value=45)
+    target_sets = st.number_input("Series objetivo", min_value=1, value=5)
+    target_reps = st.number_input("Reps objetivo por serie (opcional)", min_value=0, value=0)
 
 st.markdown("---")
 
-# ---------------------------------------------------
-# INICIO DEL ENTRENAMIENTO
-# ---------------------------------------------------
-if st.button("🔥 Iniciar Entrenamiento"):
-    if not ejercicio:
-        st.error("Debes ingresar un nombre de ejercicio.")
-        st.stop()
+# ---------- Timer Control ----------
+c1, c2, c3 = st.columns([1,1,2])
 
-    st.success(f"Entrenamiento iniciado: **{ejercicio}**")
-    st.write("---")
+with c1:
+    if st.button("Iniciar sesión"):
+        st.session_state.running = True
+        st.session_state.start_time = time.time()
+        st.session_state.set_count = 0
+        st.success("Sesión iniciada")
 
-    tabla = []  # Registro interno
+with c2:
+    if st.button("Detener sesión"):
+        st.session_state.running = False
+        st.session_state.start_time = None
+        st.success("Sesión detenida")
 
-    for i in range(1, series + 1):
-        st.subheader(f"📌 Serie {i} de {series}")
+with c3:
+    st.write("Sets completados:", st.session_state.set_count)
 
-        # Reps realizadas
-        reps = st.number_input(
-            f"Ingrese repeticiones realizadas en la serie {i}:",
-            min_value=0,
-            step=1,
-            key=f"reps_{i}"
-        )
+if st.session_state.running:
+    elapsed = int(time.time() - st.session_state.start_time)
+    st.metric("Tiempo desde inicio (s)", value=elapsed)
 
-        st.write("Presiona para registrar esta serie:")
-        if st.button(f"Registrar serie {i}", key=f"btn_{i}"):
-            tabla.append({"Serie": i, "Reps": reps})
-            st.success(f"Serie {i} registrada.")
+# ---------- Registrar serie ----------
+st.markdown("### Registrar Serie")
+reps = st.number_input("Repeticiones realizadas (esta serie)", min_value=0, value=0)
+duration = st.number_input("Duración serie (seg)", min_value=0, value=0)
 
-        st.write("## ⏳ Timer de descanso")
+if st.button("Guardar serie"):
+    st.session_state.set_count += 1
+    timestamp = datetime.now().isoformat()
+    row = [timestamp, today, exercise, method, st.session_state.set_count, reps, duration, rest_default, notes]
+
+    try:
+        wks = open_sheet()
+        ensure_header(wks)
+        wks.append_row(row, value_input_option="USER_ENTERED")
+        st.success(f"Serie guardada (set {st.session_state.set_count})")
+    except Exception as e:
+        st.error("Error al guardar en Google Sheets: " + str(e))
+
+# ---------- FIXED CLUSTER TIMER ----------
+st.markdown("### Herramienta rápida: Cluster timer")
+cluster_cols = st.columns(3)
+
+cluster_reps = cluster_cols[0].number_input("Reps por mini-set", min_value=1, value=4, key="cr")
+cluster_sets = cluster_cols[1].number_input("Mini-sets (por cluster)", min_value=1, value=3, key="cs")
+cluster_rest = cluster_cols[2].number_input("Descanso (s) entre mini-sets", min_value=5, value=45, key="crt")
+
+if st.button("Iniciar Cluster"):
+    st.session_state.running = True
+
+    for s in range(cluster_sets):
+        st.info(f"Mini-set {s+1}: haz {cluster_reps} repeticiones")
+
         placeholder = st.empty()
-
-        for sec in range(int(descanso), 0, -1):
+        for sec in range(cluster_rest, 0, -1):
             placeholder.metric("Descanso", f"{sec} s")
             time.sleep(1)
 
         placeholder.metric("Descanso", "✔ Terminado")
-        st.write("---")
 
-    st.success("¡Entrenamiento completado!")
+    st.success("Cluster finalizado. Guarda tus series si quieres registro detallado.")
 
-    st.subheader("📄 Registro final de repeticiones:")
-    st.table(tabla)
+st.markdown("---")
 
-    st.info("Puedes copiar estos datos a Google Sheets para tu historial mensual.")
+# ---------- HISTORIAL HOY ----------
+st.markdown("### Historial hoy")
+try:
+    wks = open_sheet()
+    rows = wks.get_all_records()
+    df_all = pd.DataFrame(rows)
+    if not df_all.empty:
+        df_today = df_all[df_all["date"] == today]
+        st.dataframe(df_today)
+
+        if not df_today.empty:
+            st.write("Volumen total hoy:", int(df_today["reps"].sum()))
+            st.write("Sets hoy:", int(df_today.shape[0]))
+    else:
+        st.info("No hay datos guardados aún.")
+
+except Exception as e:
+    st.error(f"Error al leer Google Sheets: {e}")
+
+# ---------- EXPORT ----------
+if st.button("Descargar historial (CSV)"):
+    if not df_all.empty:
+        csv = df_all.to_csv(index=False).encode("utf-8")
+        st.download_button("Descargar CSV", csv, "calistracker_history.csv", "text/csv")
+    else:
+        st.error("No hay datos para descargar.")
+
+
 
