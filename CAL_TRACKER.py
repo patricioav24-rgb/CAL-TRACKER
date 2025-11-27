@@ -12,7 +12,7 @@ st.set_page_config("CalisTracker", layout="centered")
 st.title("🏋️ CalisTracker • Calistenia (registro en Google Sheets)")
 
 # ---------- GOOGLE SHEETS SETUP ----------
-USE_SECRETS = False  # True si usarás st.secrets en Streamlit Cloud
+USE_SECRETS = True
 SHEET_NAME = "CalisTracker"
 
 scopes = [
@@ -152,6 +152,7 @@ if st.button("Descargar historial (CSV)"):
         st.download_button("Descargar CSV", csv, "calistracker_history.csv", "text/csv")
     else:
         st.error("No hay datos para descargar.")
+
 
 
 
