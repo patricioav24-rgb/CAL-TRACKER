@@ -10,6 +10,63 @@ from oauth2client.service_account import ServiceAccountCredentials
 # -------------------------------------------------------
 st.set_page_config(page_title="CalisTracker Pro", page_icon="🏋️", layout="wide")
 
+# -------------------------------------------------------
+# INYECCIÓN DE CSS (Estilo Pro / App Móvil)
+# -------------------------------------------------------
+def local_css():
+    st.markdown("""
+        <style>
+        /* 1. Ocultar menú de hamburguesa superior y footer de Streamlit */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        
+        /* 2. Reducir el espacio en blanco arriba (Padding) para que se vea más app */
+        .block-container {
+            padding-top: 1rem !important;
+            padding-bottom: 1rem !important;
+        }
+        
+        /* 3. Estilizar las MÉTRICAS (Tarjetas con fondo suave) */
+        [data-testid="stMetric"] {
+            background-color: #222222; /* Fondo oscuro tarjeta */
+            border-radius: 10px;
+            padding: 15px;
+            border: 1px solid #333;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+        }
+        
+        /* 4. Botones más estéticos y redondeados */
+        .stButton > button {
+            width: 100%;
+            border-radius: 20px;
+            font-weight: bold;
+            border: none;
+            transition: all 0.3s ease;
+        }
+        
+        /* Efecto hover en botones (opcional) */
+        .stButton > button:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        /* 5. Pestañas (Tabs) más grandes y centradas */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 10px;
+        }
+        .stTabs [data-baseweb="tab"] {
+            height: 50px;
+            border-radius: 5px;
+            padding-left: 20px;
+            padding-right: 20px;
+            background-color: #1E1E1E;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+# ¡IMPORTANTE! Llama a la función justo después de set_page_config
+local_css()
 # Mapeo de Colores Fijos por Ejercicio
 COLOR_MAP = {
     "Dominadas – Pronas": "#FF5733",  # Rojo/Naranja
