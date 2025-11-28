@@ -8,7 +8,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 # -------------------------------------------------------
 # 1. CONFIGURACIÓN
 # -------------------------------------------------------
-st.set_page_config(page_title="CalisTracker Pro", page_icon="📒", layout="wide")
+st.set_page_config(page_title="CalisTracker Pro", page_icon="🦾", layout="wide")
 
 # -------------------------------------------------------
 # 2. CSS (ESTILO APP)
@@ -86,7 +86,7 @@ def open_sheet_connection():
     sh = client.open(SHEET_NAME)
     return sh.sheet1
 
-@st.cache_data(ttl=60) # Bajamos el caché a 60seg para pruebas
+@st.cache_data(ttl=60) 
 def load_data():
     try:
         wks = open_sheet_connection()
@@ -119,7 +119,7 @@ if "set_count" not in st.session_state: st.session_state.set_count = 0
 # -------------------------------------------------------
 # 6. UI
 # -------------------------------------------------------
-st.title("🦾 CalisTracker Pro V3")
+st.title("📒 CalisTracker Pro")
 
 tab1, tab2 = st.tabs(["📝 Registrar Sesión", "📊 Dashboard"])
 
@@ -185,4 +185,36 @@ with tab2:
     else:
         # Procesamiento
         df['semana'] = df['fecha'].dt.to_period('W-MON').apply(lambda r: r.start_time)
-        weekly_stats = df.groupby(['semana
+        
+        # AQUÍ ESTABA TU ERROR (Línea corregida):
+        weekly_stats = df.groupby(['semana', 'ejercicio'])['total_volumen'].sum().reset_index()
+
+        # Gráfico Semanal
+        st.markdown("### 📈 Progreso Semanal")
+        chart = alt.Chart(weekly_stats).mark_bar(size=40).encode(
+            x=alt.X('semana:T', axis=alt.Axis(format='%d %b', labelColor='white', titleColor='white')),
+            y=alt.Y('total_volumen:Q', axis=alt.Axis(labelColor='white', titleColor='white')),
+            color=alt.Color('ejercicio:N', scale=alt.Scale(domain=list(COLOR_MAP.keys()), range=list(COLOR_MAP.values()))),
+            tooltip=['semana', 'ejercicio', 'total_volumen']
+        ).configure_legend(labelColor='white', titleColor='white').properties(background='transparent')
+        st.altair_chart(chart, use_container_width=True)
+
+        # Gráfico Diario
+        st.markdown("### 📅 Detalle Diario")
+        selection = st.multiselect("Filtrar:", df['ejercicio'].unique(), default=df['ejercicio'].unique())
+        df_filt = df[df['ejercicio'].isin(selection)]
+        
+        if not df_filt.empty:
+            chart_d = alt.Chart(df_filt).mark_bar(size=30).encode(
+                x=alt.X('fecha:T', axis=alt.Axis(format='%d/%m', labelColor='white', titleColor='white')),
+                y=alt.Y('total_volumen:Q', axis=alt.Axis(labelColor='white', titleColor='white')),
+                color=alt.Color('ejercicio:N', legend=None, scale=alt.Scale(domain=list(COLOR_MAP.keys()), range=list(COLOR_MAP.values()))),
+                tooltip=['fecha', 'total_volumen']
+            ).properties(background='transparent')
+            st.altair_chart(chart_d, use_container_width=True)
+
+    # --- ZONA DE DIAGNÓSTICO ---
+    st.divider()
+    with st.expander("🛠️ Diagnóstico de Datos"):
+        st.write("Si no ves gráficos, revisa aquí abajo:")
+        st.dataframe(df)
