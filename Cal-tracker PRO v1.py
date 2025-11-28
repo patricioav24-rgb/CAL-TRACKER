@@ -129,7 +129,7 @@ with tab1:
         last_rep = st.session_state.sets[-1] if st.session_state.sets else 0
         m3.metric("Última serie", f"{last_rep} reps")
 
-        st.markdown("#### Añadir Serie")
+        st.markdown("#### Añadir repeticiones de la serie")
         c_rep, c_btn = st.columns([2, 1])
         with c_rep:
             reps = st.number_input("Reps realizadas:", min_value=0, value=0, label_visibility="collapsed")
