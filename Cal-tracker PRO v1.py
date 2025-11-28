@@ -8,7 +8,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 # -------------------------------------------------------
 # 1. CONFIGURACIÓN DE PÁGINA
 # -------------------------------------------------------
-st.set_page_config(page_title="CalisTracker Pro", page_icon="📝", layout="wide")
+st.set_page_config(page_title="CalisTracker Pro", page_icon="🏋️", layout="wide")
 
 # -------------------------------------------------------
 # 2. INYECCIÓN CSS (ESTILO VISUAL)
@@ -73,7 +73,6 @@ def local_css():
         </style>
     """, unsafe_allow_html=True)
 
-# ¡¡AQUÍ LLAMAMOS A LA FUNCIÓN!!
 local_css()
 
 # -------------------------------------------------------
@@ -117,8 +116,10 @@ def load_data():
         rows = wks.get_all_records()
         if not rows: return pd.DataFrame()
         df = pd.DataFrame(rows)
+        # Aseguramos que 'fecha' sea datetime y manejamos errores de conversión
         if "fecha" in df.columns:
-            df["fecha"] = pd.to_datetime(df["fecha"])
+            df["fecha"] = pd.to_datetime(df["fecha"], errors='coerce')
+            df = df.dropna(subset=['fecha']) # Eliminar filas con fechas invalidas
         return df
     except Exception as e:
         return pd.DataFrame()
@@ -142,7 +143,7 @@ if "set_count" not in st.session_state: st.session_state.set_count = 0
 # -------------------------------------------------------
 # 6. UI PRINCIPAL
 # -------------------------------------------------------
-st.title("📝 CalisTracker Pro")
+st.title("🏋️ CalisTracker Pro")
 
 tab1, tab2 = st.tabs(["📝 Registrar Sesión", "📊 Dashboard"])
 
@@ -150,7 +151,7 @@ with tab1:
     col_main_1, col_main_2 = st.columns([1, 2])
 
     with col_main_1:
-        st.markdown("### ⚙️ Configurar") # Markdown se ve mejor que subheader a veces
+        st.markdown("### ⚙️ Configurar") 
         today = datetime.now().strftime("%Y-%m-%d")
         st.caption(f"Fecha: {today}")
         
@@ -162,7 +163,6 @@ with tab1:
     with col_main_2:
         st.markdown("### ⚡ Ejecución")
         
-        # Métricas
         m1, m2, m3 = st.columns(3)
         m1.metric("Sets", st.session_state.set_count)
         m2.metric("Volumen", sum(st.session_state.sets))
@@ -171,12 +171,11 @@ with tab1:
 
         st.markdown("---")
         
-        # Input y Botón en la misma línea visual
         c1, c2 = st.columns([2, 1])
         with c1:
             reps = st.number_input("Reps realizadas", min_value=0, value=0)
         with c2:
-            st.write("") # Espaciador para alinear botón abajo
+            st.write("") 
             st.write("") 
             if st.button("➕ AGREGAR SERIE", use_container_width=True):
                 if reps > 0:
@@ -184,10 +183,8 @@ with tab1:
                     st.session_state.sets.append(reps)
                     st.rerun()
 
-        # Visualizador de series (Estilo Tags)
         if st.session_state.sets:
             st.markdown("#### Historial sesión:")
-            # Creamos badges visuales con HTML simple
             badges = "".join([f"<span style='background:#444; padding:5px 10px; border-radius:15px; margin:2px; display:inline-block; font-size:0.9em'>{s}</span>" for s in st.session_state.sets])
             st.markdown(badges, unsafe_allow_html=True)
         
@@ -219,34 +216,57 @@ with tab1:
 with tab2:
     df = load_data()
     if df.empty:
-        st.info("Sin datos.")
-        if st.button("Inicializar"): ensure_header_initialization()
+        st.info("Sin datos. Registra un entrenamiento para ver los gráficos.")
+        if st.button("Inicializar Hoja"): ensure_header_initialization()
     else:
         # Preproceso
         df['semana'] = df['fecha'].dt.to_period('W-MON').apply(lambda r: r.start_time)
         weekly_stats = df.groupby(['semana', 'ejercicio'])['total_volumen'].sum().reset_index()
 
         st.markdown("### 📈 Progreso Semanal")
-        chart_weekly = alt.Chart(weekly_stats).mark_bar(size=35, cornerRadiusTopLeft=5, cornerRadiusTopRight=5).encode(
-            x=alt.X('semana:T', title='Semana', axis=alt.Axis(format='%d %b', labelAngle=0, grid=False)),
+        
+        # --- CORRECCIÓN GRÁFICO 1: BARRAS ANCHAS Y TEXTO BLANCO ---
+        # Aumentamos size=50 para que sean mucho más anchas
+        chart_weekly = alt.Chart(weekly_stats).mark_bar(size=50, cornerRadiusTopLeft=5, cornerRadiusTopRight=5).encode(
+            x=alt.X('semana:T', title='Semana', axis=alt.Axis(format='%d %b', labelAngle=0, grid=False, tickCount="week")),
             y=alt.Y('total_volumen:Q', title='Volumen', axis=alt.Axis(grid=True, gridDash=[5,5])),
             color=alt.Color('ejercicio:N', scale=alt.Scale(domain=list(COLOR_MAP.keys()), range=list(COLOR_MAP.values()))),
             tooltip=['semana', 'ejercicio', 'total_volumen']
+        ).configure_axis(
+            labelColor='white', # Fuerza texto blanco en ejes
+            titleColor='white', # Fuerza título blanco
+            gridColor='#444'    # Rejilla gris suave
+        ).configure_legend(
+            labelColor='white', # Leyenda blanca
+            titleColor='white'
+        ).configure_view(
+            stroke=None         # Quita el borde feo del cuadro
         ).properties(height=350, background='transparent').interactive()
+        
         st.altair_chart(chart_weekly, use_container_width=True)
 
+        st.markdown("---")
         st.markdown("### 📅 Detalle Diario")
         ejercicio_filter = st.multiselect("Filtrar:", df['ejercicio'].unique(), default=df['ejercicio'].unique())
         df_filtered = df[df['ejercicio'].isin(ejercicio_filter)]
         
         if not df_filtered.empty:
-            bar_chart = alt.Chart(df_filtered).mark_bar(size=25, cornerRadiusTopLeft=5, cornerRadiusTopRight=5).encode(
+            # --- CORRECCIÓN GRÁFICO 2: BARRAS DIARIAS ANCHAS ---
+            # size=30 para días individuales
+            bar_chart = alt.Chart(df_filtered).mark_bar(size=30, cornerRadiusTopLeft=5, cornerRadiusTopRight=5).encode(
                 x=alt.X('fecha:T', timeUnit='yearmonthdate', title='Fecha', axis=alt.Axis(format='%d/%m')),
                 y=alt.Y('total_volumen:Q', title='Volumen'),
                 color=alt.Color('ejercicio:N', legend=None, scale=alt.Scale(domain=list(COLOR_MAP.keys()), range=list(COLOR_MAP.values()))),
                 tooltip=['fecha', 'total_volumen', 'notas']
+            ).configure_axis(
+                labelColor='white',
+                titleColor='white',
+                gridColor='#444'
+            ).configure_view(
+                stroke=None
             ).properties(height=300, background='transparent').interactive()
+            
             st.altair_chart(bar_chart, use_container_width=True)
             
-            with st.expander("Ver datos crudos"):
+            with st.expander("Ver tabla de datos"):
                 st.dataframe(df_filtered.sort_values("fecha", ascending=False), use_container_width=True)
