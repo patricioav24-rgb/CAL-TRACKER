@@ -8,7 +8,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 # -------------------------------------------------------
 # 1. CONFIGURACIÓN DE PÁGINA
 # -------------------------------------------------------
-st.set_page_config(page_title="CalisTracker Pro", page_icon="🏋️", layout="wide")
+st.set_page_config(page_title="CalisTracker Pro", page_icon="📝", layout="wide")
 
 # -------------------------------------------------------
 # 2. INYECCIÓN CSS (ESTILO VISUAL)
@@ -142,7 +142,7 @@ if "set_count" not in st.session_state: st.session_state.set_count = 0
 # -------------------------------------------------------
 # 6. UI PRINCIPAL
 # -------------------------------------------------------
-st.title("🏋️ CalisTracker Pro")
+st.title("📝 CalisTracker Pro")
 
 tab1, tab2 = st.tabs(["📝 Registrar Sesión", "📊 Dashboard"])
 
