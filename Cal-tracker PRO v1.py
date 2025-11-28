@@ -96,7 +96,7 @@ if "set_count" not in st.session_state:
 # -------------------------------------------------------
 # UI PRINCIPAL
 # -------------------------------------------------------
-st.title("🏋️ CalisTracker Pro")
+st.title("CalisTracker Pro")
 st.markdown("---")
 
 tab1, tab2 = st.tabs(["📝 Registrar Sesión", "📊 Dashboard y Análisis"])
