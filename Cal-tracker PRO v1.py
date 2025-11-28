@@ -8,7 +8,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 # -------------------------------------------------------
 # 1. CONFIGURACIÓN
 # -------------------------------------------------------
-st.set_page_config(page_title="CalisTracker Pro", page_icon="🦾", layout="wide")
+st.set_page_config(page_title="CalisTracker Pro", page_icon="📒", layout="wide")
 
 # -------------------------------------------------------
 # 2. CSS (ESTILO APP)
@@ -72,7 +72,7 @@ SHEET_NAME = "CalisTracker"
 SCOPES = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
 # -------------------------------------------------------
-# 4. BACKEND (CORREGIDO LECTURA DE FECHAS)
+# 4. BACKEND
 # -------------------------------------------------------
 def get_client():
     creds = ServiceAccountCredentials.from_json_keyfile_dict(
@@ -95,14 +95,10 @@ def load_data():
         
         df = pd.DataFrame(rows)
         
-        # --- FIX CRÍTICO: FORMATO DE FECHA ---
         if "fecha" in df.columns:
-            # Convertimos a string primero para limpiar espacios
+            # Limpieza y conversión robusta de fechas
             df["fecha"] = df["fecha"].astype(str).str.strip()
-            # dayfirst=True es vital para formato Latino (DD/MM/YYYY)
             df["fecha"] = pd.to_datetime(df["fecha"], dayfirst=True, errors='coerce')
-            
-            # Eliminamos filas donde la fecha falló (NaT)
             df = df.dropna(subset=['fecha'])
             
         return df
@@ -119,7 +115,7 @@ if "set_count" not in st.session_state: st.session_state.set_count = 0
 # -------------------------------------------------------
 # 6. UI
 # -------------------------------------------------------
-st.title("📒 CalisTracker Pro")
+st.title("🦾 CalisTracker Pro")
 
 tab1, tab2 = st.tabs(["📝 Registrar Sesión", "📊 Dashboard"])
 
@@ -128,8 +124,8 @@ with tab1:
     col1, col2 = st.columns([1, 2])
     with col1:
         st.markdown("### ⚙️ Configurar")
-        today = datetime.now().strftime("%d-%m-%Y") # Formato latino visual
-        today_iso = datetime.now().strftime("%Y-%m-%d") # Formato para guardar
+        today = datetime.now().strftime("%d-%m-%Y") 
+        today_iso = datetime.now().strftime("%Y-%m-%d") 
         st.caption(f"Fecha: {today}")
         
         ejercicio = st.selectbox("Ejercicio", list(COLOR_MAP.keys()))
@@ -166,7 +162,6 @@ with tab1:
             if st.session_state.sets:
                 try:
                     wks = open_sheet_connection()
-                    # Guardamos la fecha en formato ISO (YYYY-MM-DD) para evitar problemas
                     row = [today_iso, ejercicio, metodo, len(st.session_state.sets), ",".join(map(str, st.session_state.sets)), sum(st.session_state.sets), descanso, notas]
                     wks.append_row(row)
                     st.success("✅ Guardado")
@@ -180,41 +175,45 @@ with tab2:
     df = load_data()
     
     if df.empty:
-        st.warning("⚠️ No hay datos válidos para mostrar.")
-        st.info("Asegúrate de registrar al menos un entrenamiento.")
+        st.warning("⚠️ No hay datos válidos.")
     else:
-        # Procesamiento
+        # 1. Agrupación Semanal
         df['semana'] = df['fecha'].dt.to_period('W-MON').apply(lambda r: r.start_time)
-        
-        # AQUÍ ESTABA TU ERROR (Línea corregida):
         weekly_stats = df.groupby(['semana', 'ejercicio'])['total_volumen'].sum().reset_index()
 
-        # Gráfico Semanal
         st.markdown("### 📈 Progreso Semanal")
-        chart = alt.Chart(weekly_stats).mark_bar(size=40).encode(
-            x=alt.X('semana:T', axis=alt.Axis(format='%d %b', labelColor='white', titleColor='white')),
-            y=alt.Y('total_volumen:Q', axis=alt.Axis(labelColor='white', titleColor='white')),
+        chart = alt.Chart(weekly_stats).mark_bar(size=45).encode(
+            x=alt.X('semana:T', title='Semana', axis=alt.Axis(format='%d %b', labelColor='white', titleColor='white')),
+            y=alt.Y('total_volumen:Q', title='Volumen', axis=alt.Axis(labelColor='white', titleColor='white')),
             color=alt.Color('ejercicio:N', scale=alt.Scale(domain=list(COLOR_MAP.keys()), range=list(COLOR_MAP.values()))),
             tooltip=['semana', 'ejercicio', 'total_volumen']
         ).configure_legend(labelColor='white', titleColor='white').properties(background='transparent')
         st.altair_chart(chart, use_container_width=True)
 
-        # Gráfico Diario
+        # 2. Agrupación Diaria (LA SOLUCIÓN A TU PROBLEMA)
         st.markdown("### 📅 Detalle Diario")
         selection = st.multiselect("Filtrar:", df['ejercicio'].unique(), default=df['ejercicio'].unique())
+        
+        # Filtramos primero
         df_filt = df[df['ejercicio'].isin(selection)]
         
         if not df_filt.empty:
-            chart_d = alt.Chart(df_filt).mark_bar(size=30).encode(
-                x=alt.X('fecha:T', axis=alt.Axis(format='%d/%m', labelColor='white', titleColor='white')),
-                y=alt.Y('total_volumen:Q', axis=alt.Axis(labelColor='white', titleColor='white')),
+            # IMPORTANTE: Agrupamos por día para que sume todo en UNA sola barra por día
+            daily_stats = df_filt.groupby(['fecha', 'ejercicio'])['total_volumen'].sum().reset_index()
+
+            chart_d = alt.Chart(daily_stats).mark_bar(size=35).encode(
+                # Usamos 'fecha:T' para que entienda que es tiempo y no texto repetido
+                x=alt.X('fecha:T', title='Fecha', axis=alt.Axis(format='%d/%m', labelColor='white', titleColor='white')),
+                y=alt.Y('total_volumen:Q', title='Volumen', axis=alt.Axis(labelColor='white', titleColor='white')),
                 color=alt.Color('ejercicio:N', legend=None, scale=alt.Scale(domain=list(COLOR_MAP.keys()), range=list(COLOR_MAP.values()))),
-                tooltip=['fecha', 'total_volumen']
+                tooltip=[
+                    alt.Tooltip('fecha', title='Fecha', format='%d-%m-%Y'),
+                    'ejercicio', 
+                    'total_volumen'
+                ]
             ).properties(background='transparent')
             st.altair_chart(chart_d, use_container_width=True)
 
-    # --- ZONA DE DIAGNÓSTICO ---
     st.divider()
-    with st.expander("🛠️ Diagnóstico de Datos"):
-        st.write("Si no ves gráficos, revisa aquí abajo:")
+    with st.expander("🛠️ Ver Tabla de Datos"):
         st.dataframe(df)
