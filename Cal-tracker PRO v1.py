@@ -8,7 +8,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 # -------------------------------------------------------
 # CONFIGURACIÓN GENERAL
 # -------------------------------------------------------
-st.set_page_config(page_title="CalisTracker Pro", page_icon="🏋️", layout="wide")
+st.set_page_config(page_title="CalisTracker Pro", page_icon="📒", layout="wide")
 
 # -------------------------------------------------------
 # INYECCIÓN DE CSS (Estilo Pro / App Móvil)
