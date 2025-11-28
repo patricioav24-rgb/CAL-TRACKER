@@ -10,7 +10,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 # -------------------------------------------------------
 st.set_page_config(page_title="CalisTracker Pro", page_icon="🏋️", layout="wide")
 
-# Colores personalizados para cada ejercicio (puedes agregar más)
+# Mapeo de Colores Fijos por Ejercicio
 COLOR_MAP = {
     "Dominadas – Pronas": "#FF5733",  # Rojo/Naranja
     "Dominadas – Supinas": "#C70039", # Rojo oscuro
@@ -27,7 +27,7 @@ SCOPES = [
 ]
 
 # -------------------------------------------------------
-# FUNCIONES DE BACKEND
+# FUNCIONES DE BACKEND (Optimizadas para evitar Error 429)
 # -------------------------------------------------------
 def get_client():
     """Conecta usando las credenciales en st.secrets."""
@@ -37,35 +37,53 @@ def get_client():
     return gspread.authorize(creds)
 
 @st.cache_resource(ttl=600)
-def open_sheet():
+def open_sheet_connection():
+    """Abre la conexión con la hoja. Se mantiene en caché."""
     client = get_client()
     sh = client.open(SHEET_NAME)
     wks = sh.sheet1
     return wks
 
-def ensure_header(wks):
-    header = [
-        "fecha", "ejercicio", "metodo", "total_sets",
-        "reps_por_set", "total_volumen", "descanso", "notas"
-    ]
-    first = wks.row_values(1)
-    if first != header:
-        wks.clear()
-        wks.insert_row(header, 1)
-
+@st.cache_data(ttl=300)
 def load_data():
-    """Carga los datos y convierte la fecha a datetime."""
+    """
+    Carga los datos y los guarda en memoria (caché) por 5 minutos.
+    Esto evita saturar la API de Google (Error 429).
+    """
     try:
-        wks = open_sheet()
-        ensure_header(wks)
+        wks = open_sheet_connection()
+        
+        # Leemos todo de una vez
         rows = wks.get_all_records()
+        
+        # Si la hoja está vacía o es nueva, manejamos el error
+        if not rows:
+            return pd.DataFrame()
+
         df = pd.DataFrame(rows)
-        if not df.empty:
+        
+        # Convertir fecha a datetime si existe la columna
+        if "fecha" in df.columns:
             df["fecha"] = pd.to_datetime(df["fecha"])
+            
         return df
     except Exception as e:
-        st.error(f"Error de conexión: {e}")
+        st.warning(f"No se pudo cargar el historial reciente (posible límite de API). Intenta en unos minutos. Error: {e}")
         return pd.DataFrame()
+
+def ensure_header_initialization():
+    """
+    Función auxiliar para asegurar que existan cabeceras.
+    Se debería ejecutar solo una vez o manualmente si la hoja es nueva.
+    """
+    try:
+        wks = open_sheet_connection()
+        header = ["fecha", "ejercicio", "metodo", "total_sets", "reps_por_set", "total_volumen", "descanso", "notas"]
+        first = wks.row_values(1)
+        if first != header:
+            wks.insert_row(header, 1)
+    except:
+        pass
 
 # -------------------------------------------------------
 # ESTADO DE LA SESIÓN
@@ -81,7 +99,6 @@ if "set_count" not in st.session_state:
 st.title("🏋️ CalisTracker Pro")
 st.markdown("---")
 
-# Usamos pestañas para separar el registro del análisis
 tab1, tab2 = st.tabs(["📝 Registrar Sesión", "📊 Dashboard y Análisis"])
 
 # =======================================================
@@ -104,7 +121,7 @@ with tab1:
     with col_main_2:
         st.subheader("Ejecución")
         
-        # Sistema de métricas en vivo
+        # Métricas en vivo
         m1, m2, m3 = st.columns(3)
         m1.metric("Sets Totales", st.session_state.set_count)
         current_vol = sum(st.session_state.sets)
@@ -121,9 +138,8 @@ with tab1:
                 if reps > 0:
                     st.session_state.set_count += 1
                     st.session_state.sets.append(reps)
-                    st.rerun() # Recarga para actualizar métricas al instante
+                    st.rerun()
 
-        # Visualización de las series como "tags"
         if st.session_state.sets:
             st.write("Series realizadas:")
             sets_str = " - ".join([f"**{s}**" for s in st.session_state.sets])
@@ -131,12 +147,13 @@ with tab1:
         
         st.divider()
         
-        # Botón de Guardado
+        # BOTÓN GUARDAR (Optimizado)
         if st.button("💾 Guardar Entrenamiento", type="primary", use_container_width=True):
             if st.session_state.sets:
                 try:
-                    wks = open_sheet()
-                    ensure_header(wks)
+                    wks = open_sheet_connection()
+                    
+                    # Preparamos la fila
                     row = [
                         today, ejercicio, metodo,
                         len(st.session_state.sets),
@@ -145,72 +162,94 @@ with tab1:
                         descanso,
                         notas
                     ]
+                    
+                    # Escribimos (Append consume menos cuota que leer+escribir)
                     wks.append_row(row)
+                    
                     st.success("✅ ¡Entrenamiento guardado!")
-                    # Reset
+                    
+                    # Limpiamos caché para que el gráfico se actualice al cambiar de pestaña
+                    st.cache_data.clear()
+                    
+                    # Reset UI
                     st.session_state.sets = []
                     st.session_state.set_count = 0
                     st.rerun()
+                    
                 except Exception as e:
-                    st.error(f"Error al guardar: {e}")
+                    st.error(f"Error al guardar (Google API): {e}")
             else:
                 st.warning("⚠️ Agrega al menos una serie antes de guardar.")
 
 # =======================================================
-# TAB 2: DASHBOARD (Mejorado con Altair)
+# TAB 2: DASHBOARD
 # =======================================================
 with tab2:
+    # 1. Cargamos datos (usando caché)
     df = load_data()
     
-    if df.empty:
-        st.info("Aún no hay datos para mostrar análisis.")
+    # Verificamos si hay datos y si las columnas son correctas
+    required_columns = ["fecha", "ejercicio", "total_volumen"]
+    has_data = not df.empty and all(col in df.columns for col in required_columns)
+
+    if not has_data:
+        st.info("Aún no hay datos suficientes para mostrar análisis. Registra tu primer entrenamiento en la pestaña anterior.")
+        # Intentamos inicializar cabeceras por si es la primera vez
+        if st.button("Inicializar Hoja (Si es la primera vez)"):
+            ensure_header_initialization()
+            st.success("Cabeceras creadas. Intenta registrar ahora.")
     else:
-        # --- PRECESAMIENTO DE DATOS ---
-        # 1. Agrupar por SEMANA y EJERCICIO
-        # 'W-MON' significa que la semana empieza el Lunes
+        # --- PROCESAMIENTO DE DATOS ---
+        # Agrupar por SEMANA y EJERCICIO
         df['semana'] = df['fecha'].dt.to_period('W-MON').apply(lambda r: r.start_time)
-        
-        # Agrupación semanal: Suma de volumen por semana y ejercicio
         weekly_stats = df.groupby(['semana', 'ejercicio'])['total_volumen'].sum().reset_index()
 
-        # --- SECCIÓN 1: PROGRESO SEMANAL ---
-        st.subheader("📈 Evolución Semanal de Volumen")
-        st.caption("Comparativa de volumen total acumulado por semana para cada ejercicio.")
+        # --- SECCIÓN 1: PROGRESO SEMANAL (GRÁFICO DE BARRAS) ---
+        st.subheader("📊 Evolución Semanal de Volumen")
+        st.caption("Barras apiladas: La altura total es tu volumen semanal, dividido por colores según ejercicio.")
 
-        # Gráfico de líneas con puntos usando Altair
-        chart_weekly = alt.Chart(weekly_stats).mark_line(point=True).encode(
+        # CAMBIO REALIZADO: mark_bar() en lugar de mark_line()
+        chart_weekly = alt.Chart(weekly_stats).mark_bar().encode(
             x=alt.X('semana:T', title='Semana', axis=alt.Axis(format='%d %b')),
             y=alt.Y('total_volumen:Q', title='Volumen Total (Reps)'),
-            color=alt.Color('ejercicio:N', scale=alt.Scale(domain=list(COLOR_MAP.keys()), range=list(COLOR_MAP.values()))),
+            color=alt.Color('ejercicio:N', 
+                            scale=alt.Scale(domain=list(COLOR_MAP.keys()), range=list(COLOR_MAP.values())),
+                            legend=alt.Legend(title="Ejercicios")),
             tooltip=['semana', 'ejercicio', 'total_volumen']
         ).properties(
-            height=400
+            height=450
         ).interactive()
 
         st.altair_chart(chart_weekly, use_container_width=True)
 
-        # --- SECCIÓN 2: DATOS FILTRADOS ---
+        # --- SECCIÓN 2: HISTORIAL FILTRADO ---
         st.divider()
         st.subheader("🔎 Análisis Detallado")
         
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            ejercicio_filter = st.multiselect("Filtrar Ejercicios", options=df['ejercicio'].unique(), default=df['ejercicio'].unique())
+            # Filtro por ejercicio
+            ejercicio_filter = st.multiselect("Filtrar Ejercicios", 
+                                              options=df['ejercicio'].unique(), 
+                                              default=df['ejercicio'].unique())
         
-        # Filtrar DF
+        # Aplicamos filtro
         df_filtered = df[df['ejercicio'].isin(ejercicio_filter)]
         
-        # Gráfico de Barras Mensual con los filtros aplicados
-        st.markdown("##### Volumen Acumulado (Filtrado)")
-        
-        bar_chart = alt.Chart(df_filtered).mark_bar().encode(
-            x=alt.X('fecha:T', title='Fecha Sesión'),
-            y=alt.Y('total_volumen:Q', title='Volumen'),
-            color=alt.Color('ejercicio:N', legend=None, scale=alt.Scale(domain=list(COLOR_MAP.keys()), range=list(COLOR_MAP.values()))),
-            tooltip=['fecha', 'ejercicio', 'total_volumen', 'notas']
-        ).properties(height=300)
-        
-        st.altair_chart(bar_chart, use_container_width=True)
+        if not df_filtered.empty:
+            # Gráfico de Barras por Sesión (Diario)
+            st.markdown("##### Detalle por Sesión")
+            bar_chart = alt.Chart(df_filtered).mark_bar().encode(
+                x=alt.X('fecha:T', title='Fecha Sesión'),
+                y=alt.Y('total_volumen:Q', title='Volumen'),
+                color=alt.Color('ejercicio:N', legend=None, 
+                                scale=alt.Scale(domain=list(COLOR_MAP.keys()), range=list(COLOR_MAP.values()))),
+                tooltip=['fecha', 'ejercicio', 'total_volumen', 'notas']
+            ).properties(height=300)
+            
+            st.altair_chart(bar_chart, use_container_width=True)
 
-        with st.expander("Ver tabla de datos completa"):
-            st.dataframe(df_filtered.sort_values(by="fecha", ascending=False), use_container_width=True)
+            with st.expander("Ver tabla de datos completa"):
+                st.dataframe(df_filtered.sort_values(by="fecha", ascending=False), use_container_width=True)
+        else:
+            st.info("No hay datos para los filtros seleccionados.")
